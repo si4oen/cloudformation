@@ -1,0 +1,708 @@
+### https://www.infoq.com/articles/aws-vpc-cloudformation/
+### https://github.com/kennyk65/aws-vpc-cloud-formation/blob/master/base-vpc-example.template.yml
+### https://github.com/olibob/cfntutorial
+
+# This CloudFormation template deploys a basic VPC / Network.  Specifically:
+# It deploys a VPC with 4 subnets (2 public, 6 private) across 2 Availability Zones
+# A NAT Gateway is used to provide egress for private subnets.
+# The VPC and subnets are exported for use by other stacks.
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC template (2 public, 6 private, 2 Availability Zones)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "VPC Network Configuration"
+        Parameters:
+          - VpcCidrBlock
+          - PublicSubnetA01Block
+          - PublicSubnetB01Block
+          - PrivateSubnetA01Block
+          - PrivateSubnetB01Block
+          - PrivateSubnetA02Block
+          - PrivateSubnetB02Block
+          - PrivateSubnetA03Block
+          - PrivateSubnetB03Block
+      - Label:
+          default: Bastion Instance Configuration
+        Parameters:
+          - BastionAmiId
+          - ServerInstanceType
+          - BastionPrivateIpAddress
+          - BastionKeyPairName
+          - BastionSSHRemoteAccessCIDR
+    ParameterLabels:
+      VpcCidrBlock:
+        default: VPC CIDR
+      PublicSubnetA01Block:
+        default: Public subnet A01 CIDR
+      PublicSubnetB01Block:
+        default: Public subnet B01 CIDR
+      PrivateSubnetA01Block:
+        default: Private subnet A01 CIDR
+      PrivateSubnetB01Block:
+        default: Private subnet B01 CIDR
+      PrivateSubnetA02Block:
+        default: Private subnet A02 CIDR
+      PrivateSubnetB02Block:
+        default: Private subnet B02 CIDR
+      PrivateSubnetA03Block:
+        default: Private subnet A03 CIDR
+      PrivateSubnetB03Block:
+        default: Private subnet B03 CIDR
+      BastionAmiId:
+        default: Bastion AMI ID
+      ServerInstanceType:
+        default: Instance type
+      BastionPrivateIpAddress:
+        default: Bastion private IP address
+      BastionKeyPairName:
+        default: Bastion host key pair name
+      BastionSSHRemoteAccessCIDR:
+        default: Allowed bastion external access CIDR
+
+Parameters:
+
+  VpcCidrBlock:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.0.0/16
+    Description: The CIDR range for the VPC. This should be a valid private (RFC 1918) CIDR range.
+
+  PublicSubnetA01Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.0.0/21
+    Description: CidrBlock for public subnet A01 within the VPC
+
+  PublicSubnetB01Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.8.0/21
+    Description: CidrBlock for public subnet B01 within the VPC
+
+  PrivateSubnetA01Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.16.0/21
+    Description: CidrBlock for private subnet A01 within the VPC
+
+  PrivateSubnetB01Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.24.0/21
+    Description: CidrBlock for private subnet B01 within the VPC
+
+  PrivateSubnetA02Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.32.0/21
+    Description: CidrBlock for private subnet A02 within the VPC
+
+  PrivateSubnetB02Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.40.0/21
+    Description: CidrBlock for private subnet B02 within the VPC
+
+  PrivateSubnetA03Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.48.0/21
+    Description: CidrBlock for private subnet A03 within the VPC
+
+  PrivateSubnetB03Block:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP range in x.x.x.x/x notation
+    Type: String
+    Default: 10.1.56.0/21
+    Description: CidrBlock for private subnet B03 within the VPC
+
+  BastionAmiId:
+    Description: Bastion AMI ID
+    Type: String
+    Default: ami-0f43fd81709ba0302 # ami id on market place
+
+  ServerInstanceType:
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+    ConstraintDescription: Choose an instance type.
+    Default: t2.micro
+    Description: Bastion instance type
+    Type: String
+  
+  BastionPrivateIpAddress:
+    Description: Bastion private IP address
+    Type: String
+    Default: 10.1.0.4 # first three 03 IPs (1-2-3) are aws reserved, so use from 4
+
+  BastionKeyPairName:
+    Description: Bastion host Key Pair
+    Type: "AWS::EC2::KeyPair::KeyName"
+    ConstraintDescription: must be a valid Key Pair
+  
+  BastionSSHRemoteAccessCIDR:
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/x
+    Description: Allowed CIDR block for external SSH access to the bastions
+    Type: String
+    Default: 0.0.0.0/0
+
+Resources:
+  # First, a VPC:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value:  !Join ['', [!Ref "AWS::StackName"]]
+      - Key: Description
+        Value: VUI-Common-VPC (10.1.0.0/16)
+
+  # Our VPC will need internet access:      
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-InternetGateway
+  
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    # Notice how you can't attach an IGW to a VPC unless both are created:
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Now some subnets, 2 public and 6 private:
+  PublicSubnetA01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetA01Block
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AZ in the list        
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PublicSubnetA01
+      - Key: kubernetes.io/role/elb     # use for EKS
+        Value: 1
+  
+  PublicSubnetB01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetB01Block
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PublicSubnetB01
+      - Key: kubernetes.io/role/elb     # use for EKS
+        Value: 1
+  
+  PrivateSubnetA01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetA01Block
+      AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateSubnetA01
+      - Key: kubernetes.io/role/internal-elb     # use for EKS
+        Value: 1
+  
+  PrivateSubnetB01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetB01Block
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateSubnetB01
+      - Key: kubernetes.io/role/internal-elb     # use for EKS
+        Value: 1
+
+  PrivateSubnetA02:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetA02Block
+      AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateSubnetA02
+      - Key: kubernetes.io/role/internal-elb     # use for EKS
+        Value: 1
+  
+  PrivateSubnetB02:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetB02Block
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateSubnetB02
+      - Key: kubernetes.io/role/internal-elb     # use for EKS
+        Value: 1
+
+  PrivateSubnetA03:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetA03Block
+      AvailabilityZone: !Select [ 0, !GetAZs ]    # Get the first AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateSubnetA03
+      - Key: kubernetes.io/role/internal-elb     # use for EKS
+        Value: 1
+  
+  PrivateSubnetB03:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetB03Block
+      AvailabilityZone: !Select [ 1, !GetAZs ]    # Get the second AZ in the list  
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateSubnetB03
+      - Key: kubernetes.io/role/internal-elb     # use for EKS
+        Value: 1
+
+  # Some route tables for our subnets:
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PublicRouteTable-PublicSubnets
+      - Key: Network
+        Value: PublicSubnets
+
+  PublicRoute01:   # Public route table has direct routing to IGW:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      
+  # Here is a private route table:
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateRouteTable-PrivateSubnetAxx
+      - Key: Network
+        Value: PrivateSubnetAxx
+  
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-PrivateRouteTable-PrivateSubnetBxx
+      - Key: Network
+        Value: PrivateSubnetBxx
+  
+  PrivateRoute01:   # Private route table can access web via NAT (created below)
+    DependsOn:
+    - VPCGatewayAttachment
+    - NATGateway01
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      # Route traffic through the NAT Gateway:
+      NatGatewayId: !Ref NATGateway01
+  
+  PrivateRoute02:   # Private route table can access web via NAT (created below)
+    DependsOn:
+    - VPCGatewayAttachment
+    - NATGateway02
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      # Route traffic through the NAT Gateway:
+      NatGatewayId: !Ref NATGateway02
+
+  # Attach the public subnets to public route tables, 
+  # and attach the private subnets to private route tables:    
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA01
+      RouteTableId: !Ref PublicRouteTable
+  
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB01
+      RouteTableId: !Ref PublicRouteTable
+  
+  PrivateSubnetA01RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA01
+      RouteTableId: !Ref PrivateRouteTableA
+  
+  PrivateSubnetB01RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB01
+      RouteTableId: !Ref PrivateRouteTableB
+
+  PrivateSubnetA02RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA02
+      RouteTableId: !Ref PrivateRouteTableA
+  
+  PrivateSubnetB02RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB02
+      RouteTableId: !Ref PrivateRouteTableB
+
+  PrivateSubnetA03RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA03
+      RouteTableId: !Ref PrivateRouteTableA
+  
+  PrivateSubnetB03RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB03
+      RouteTableId: !Ref PrivateRouteTableB
+
+  # NAT Gateway: 
+  NATGateway01:
+    DependsOn:
+    - NatGatewayEIP01
+    - PublicSubnetA01
+    - VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId: !GetAtt NatGatewayEIP01.AllocationId
+      SubnetId: !Ref PublicSubnetA01
+      Tags: 
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-NatGWA01
+  
+  NATGateway02:
+    DependsOn:
+    - NatGatewayEIP02
+    - PublicSubnetB01
+    - VPCGatewayAttachment
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId: !GetAtt NatGatewayEIP02.AllocationId
+      SubnetId: !Ref PublicSubnetB01
+      Tags: 
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-NatGWB01
+  
+  # EIP
+  NatGatewayEIP01:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+      Tags: 
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-EIPA01
+  
+  NatGatewayEIP02:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+      Tags: 
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-EIPB01
+
+  BastionEIP01:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+      Tags: 
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-BastionEIPA01
+
+  # Security Group
+  BastionSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Enable SSH access via port 22
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref BastionSSHRemoteAccessCIDR
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BastionSecurityGroup
+
+  PublicSubnetA01SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Public Subnet A01 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnetA01SecurityGroup
+
+  PublicSubnetB01SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Public Subnet B01 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnetB01SecurityGroup
+
+  PrivateSubnetA01SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Private Subnet A01 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnetA01SecurityGroup
+
+  PrivateSubnetB01SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Private Subnet B01 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnetB01SecurityGroup
+
+  PrivateSubnetA02SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Private Subnet A02 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnetA02SecurityGroup
+      
+  PrivateSubnetB02SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Private Subnet B02 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnetB02SecurityGroup
+
+  PrivateSubnetA03SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Private Subnet A03 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnetA03SecurityGroup
+      
+  PrivateSubnetB03SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: Private Subnet B03 Security Group
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnetB03SecurityGroup
+
+  # Instances
+  BastionHost:
+    DependsOn:
+    - BastionEIP01
+    - BastionSecurityGroup
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: !Ref BastionAmiId
+      InstanceType: !Ref ServerInstanceType
+      KeyName: !Ref BastionKeyPairName
+      SubnetId: !Ref PublicSubnetA01
+      PrivateIpAddress: !Ref BastionPrivateIpAddress
+      SecurityGroupIds: 
+        - !Ref BastionSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-BastionHostA01
+
+  # EIP Association
+  EIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    DependsOn:
+    - BastionHost
+    - BastionEIP01
+    Properties:
+      InstanceId:
+        Ref: BastionHost
+      AllocationId:
+        Fn::GetAtt:
+        - BastionEIP01
+        - AllocationId
+
+### Output INformation to Cloudformation Dashboard
+Outputs:
+
+  StackName:
+    Description: 'Stack Name.'
+    Value: !Sub '${AWS::StackName}'
+    Export:
+      Name: !Sub '${AWS::StackName}'
+
+  VpcId:
+    Description: 'VpcId.'
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcId'
+  
+  CidrBlock:
+    Description: 'The set of IP addresses for the VPC.'
+    Value: !GetAtt 'VPC.CidrBlock'
+    Export:
+      Name: !Sub '${AWS::StackName}-CidrBlock'
+
+  InternetGateway:
+    Description: 'InternetGateway.'
+    Value: !Ref InternetGateway
+    Export:
+      Name: !Sub '${AWS::StackName}-InternetGateway'
+
+  PublicSubnets:
+    Description: 'Public Subnets.'
+    Value: !Join [',', [!Ref PublicSubnetA01, !Ref PublicSubnetB01]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnets'
+
+  PublicSubnetA01:
+    Description: 'Public Subnet A01.'
+    Value: !Join [',', [!Ref PublicSubnetA01]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetA01'
+
+  PublicSubnetB01:
+    Description: 'Public Subnet B01.'
+    Value: !Join [',', [!Ref PublicSubnetB01]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetB01'
+
+  PublicRouteTables:
+    Description: 'Public Route Tables.'
+    Value: !Join [',', [!Ref PublicRouteTable]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicRouteTables'
+
+  PrivateSubnets:
+    Description: 'Private Subnets.'
+    Value: !Join [',', [!Ref PrivateSubnetA01, !Ref PrivateSubnetB01, !Ref PrivateSubnetA02, !Ref PrivateSubnetB02, !Ref PrivateSubnetA03, !Ref PrivateSubnetB03]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnets'
+
+  PrivateSubnetA01:
+    Description: 'Private Subnet A01.'
+    Value: !Join [',', [!Ref PrivateSubnetA01]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetA01'
+
+  PrivateSubnetB01:
+    Description: 'Private Subnet B01.'
+    Value: !Join [',', [!Ref PrivateSubnetB01]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetB01'
+
+  PrivateSubnetA02:
+    Description: 'Private Subnet A02.'
+    Value: !Join [',', [!Ref PrivateSubnetA02]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetA02'
+
+  PrivateSubnetB02:
+    Description: 'Private Subnet B02.'
+    Value: !Join [',', [!Ref PrivateSubnetB02]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetB02'
+  
+  PrivateSubnetA03:
+    Description: 'Private Subnet A03.'
+    Value: !Join [',', [!Ref PrivateSubnetA03]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetA03'
+
+  PrivateSubnetB03:
+    Description: 'Private Subnet B03.'
+    Value: !Join [',', [!Ref PrivateSubnetB03]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateSubnetB03'
+  
+  PrivateRouteTables:
+    Description: 'Private Route Tables.'
+    Value: !Join [',', [!Ref PrivateRouteTableA, !Ref PrivateRouteTableB]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateRouteTables'
+
+  PrivateRouteTableA:
+    Description: 'Private Route Table A.'
+    Value: !Join [',', [!Ref PrivateRouteTableA]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateRouteTableA'
+
+  PrivateRouteTableB:
+    Description: 'Private Route Table B.'
+    Value: !Join [',', [!Ref PrivateRouteTableB]]
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateRouteTableB'
+  
+  BastionHostDNS:
+    Description: Bastion host public DNS.
+    Value: !GetAtt BastionHost.PublicDnsName
+    Export:
+      Name: !Sub '${AWS::StackName}-BastionHostDNS'
+  
+  BastionHostPublicIPAddress:
+    Description: Bastion host public IP.
+    Value: !GetAtt BastionHost.PublicIp
+    Export:
+      Name: !Sub '${AWS::StackName}-BastionHostPublicIPAddress'
+
+  BastionHostPrivateIPAddress:
+    Description: Bastion host private IP.
+    Value: !GetAtt BastionHost.PrivateIp
+    Export:
+      Name: !Sub '${AWS::StackName}-BastionHostPrivateIPAddress'
+
+  BastionHostSecurityGroup:
+    Description: Bastion host private IP.
+    Value: !Ref BastionSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-BastionHostSecurityGroup'
